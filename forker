@@ -1,0 +1,94 @@
+#!/bin/bash
+
+set -eu
+
+declare -i max=$(perl -MPOSIX -le 'print INT_MAX')
+
+if [ "$#" != 2 ]; then
+    echo >&2 "Usage: $0 <clone_url> <public_username>
+
+A VERY SLOW mining implementation. This should give you an idea of
+where to start, but it probably won't successfully mine you any
+Gitcoins.
+
+Arguments:
+
+<clone_url> is the string you'd pass to git clone (i.e.
+  something of the form username@hostname:path)
+
+<public_username> is the public username provided to you in
+  the CTF web interface."
+    exit 1
+fi
+
+export clone_spec=$1
+export public_username=$2
+trap "kill -- -${BASHPID}" SIGINT SIGTERM EXIT
+
+prepare_index() {
+    perl -i -pe 's/($ENV{public_username}: )(\d+)/$1 . ($2+1)/e' LEDGER.txt
+    grep -q "$public_username" LEDGER.txt || echo "$public_username: 1" >> LEDGER.txt
+
+    git add LEDGER.txt
+}
+
+solve() {
+    # Brute force until you find something that's lexicographically
+    # smaller than $difficulty.
+    difficulty=$(cat difficulty.txt)
+
+    # Create a Git tree object reflecting our current working
+    # directory
+    tree=$(git write-tree)
+    parent=$(git rev-parse HEAD)
+    timestamp=$(date +%s)
+
+    width=$((max/4))
+
+    counter1=0
+    counter2=$((1 * width))
+    counter3=$((2 * width))
+    counter4=$((3 * width))
+
+    parallel --halt 2 "../worker.rb ${tree} ${parent} ${timestamp} ${difficulty} {}" ::: $counter1 $counter2 $counter3 $counter4 || echo "yay"
+    sha1=$(git hash-object -t commit -w --stdin < body)
+    echo "found ${sha1}"
+    git reset --hard "$sha1" > /dev/null
+}
+
+solve_from() {
+    ../worker.rb ${tree} ${parent} ${timestamp} ${difficulty} $1 2> "../worker_${1}.log"
+    sha1=$(git hash-object -t commit -w --stdin < body)
+    echo "found ${sha1}"
+    git reset --hard "$sha1" > /dev/null
+    exit 1
+}
+
+reset() {
+    git fetch origin master >/dev/null 2>/dev/null
+    git reset --hard origin/master >/dev/null
+}
+
+# Set up repo
+local_path=./${clone_spec##*:}
+
+if [ -d "$local_path" ]; then
+    echo "Deleting existing repository at $local_path"
+    rm -rf "$local_path"
+fi
+
+echo "Cloning repository to $local_path"
+git clone "$clone_spec" "$local_path"
+cd "$local_path"
+
+while true; do
+    prepare_index
+    solve
+    if git push origin master; then
+        echo "Success :)"
+        break
+    else
+        echo "Starting over :("
+        reset
+    fi
+done
