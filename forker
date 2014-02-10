@@ -56,14 +56,6 @@ solve() {
     git reset --hard "$sha1" > /dev/null
 }
 
-solve_from() {
-    ../worker.rb ${tree} ${parent} ${timestamp} ${difficulty} $1 2> "../worker_${1}.log"
-    sha1=$(git hash-object -t commit -w --stdin < body)
-    echo "found ${sha1}"
-    git reset --hard "$sha1" > /dev/null
-    exit 1
-}
-
 reset() {
     git fetch origin master >/dev/null 2>/dev/null
     git reset --hard origin/master >/dev/null
